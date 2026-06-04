@@ -64,8 +64,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
     var showPasswordPrompt by remember { mutableStateOf(false) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var passwordInput by remember { mutableStateOf("") }
-    var showLocationChannelsSheet by remember { mutableStateOf(false) }
-    var showLocationNotesSheet by remember { mutableStateOf(false) }
     var showUserSheet by remember { mutableStateOf(false) }
     var selectedUserForSheet by remember { mutableStateOf("") }
     var selectedMessageForSheet by remember { mutableStateOf<BitchatMessage?>(null) }
@@ -83,29 +81,14 @@ fun ChatScreen(viewModel: ChatViewModel) {
     val isConnected by viewModel.isConnected.collectAsStateWithLifecycle()
     val passwordPromptChannel by viewModel.passwordPromptChannel.collectAsStateWithLifecycle()
 
-    // Get location channel info for timeline switching
-    val selectedLocationChannel by viewModel.selectedLocationChannel.collectAsStateWithLifecycle()
-
     // Determine what messages to show based on current context (unified timelines)
     // Legacy private chat timeline removed - private chats now exclusively use PrivateChatSheet
     val displayMessages = when {
         currentChannel != null -> channelMessages[currentChannel] ?: emptyList()
-        else -> {
-            val locationChannel = selectedLocationChannel
-            if (locationChannel is com.bitchat.android.geohash.ChannelID.Location) {
-                val geokey = "geo:${locationChannel.channel.geohash}"
-                channelMessages[geokey] ?: emptyList()
-            } else {
-                messages // Mesh timeline
-            }
-        }
+        else -> messages
     }
 
-    // Determine whether to show media buttons (only hide in geohash location chats)
-    val showMediaButtons = when {
-        currentChannel != null -> true
-        else -> selectedLocationChannel !is com.bitchat.android.geohash.ChannelID.Location
-    }
+    val showMediaButtons = true
 
     // Use WindowInsets to handle keyboard properly
     Box(
@@ -142,17 +125,9 @@ fun ChatScreen(viewModel: ChatViewModel) {
                     val currentText = messageText.text
                     
                     // Extract base nickname and hash suffix from full sender name
-                    val (baseName, hashSuffix) = splitSuffix(fullSenderName)
+                    val (baseName, _) = splitSuffix(fullSenderName)
                     
-                    // Check if we're in a geohash channel to include hash suffix
-                    val selectedLocationChannel = viewModel.selectedLocationChannel.value
-                    val mentionText = if (selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location && hashSuffix.isNotEmpty()) {
-                        // In geohash chat - include the hash suffix from the full display name
-                        "@$baseName$hashSuffix"
-                    } else {
-                        // Regular chat - just the base nickname
-                        "@$baseName"
-                    }
+                    val mentionText = "@$baseName"
                     
                     val newText = when {
                         currentText.isEmpty() -> "$mentionText "
@@ -250,9 +225,7 @@ fun ChatScreen(viewModel: ChatViewModel) {
             colorScheme = colorScheme,
             onSidebarToggle = { viewModel.showMeshPeerList() },
             onShowAppInfo = { viewModel.showAppInfo() },
-            onPanicClear = { viewModel.panicClearAllData() },
-            onLocationChannelsClick = { showLocationChannelsSheet = true },
-            onLocationNotesClick = { showLocationNotesSheet = true }
+            onPanicClear = { viewModel.panicClearAllData() }
         )
 
         // Divider under header - positioned after status bar + header height
@@ -325,10 +298,6 @@ fun ChatScreen(viewModel: ChatViewModel) {
         },
         showAppInfo = showAppInfo,
         onAppInfoDismiss = { viewModel.hideAppInfo() },
-        showLocationChannelsSheet = showLocationChannelsSheet,
-        onLocationChannelsSheetDismiss = { showLocationChannelsSheet = false },
-        showLocationNotesSheet = showLocationNotesSheet,
-        onLocationNotesSheetDismiss = { showLocationNotesSheet = false },
         showUserSheet = showUserSheet,
         onUserSheetDismiss = { 
             showUserSheet = false
@@ -417,13 +386,8 @@ private fun ChatFloatingHeader(
     colorScheme: ColorScheme,
     onSidebarToggle: () -> Unit,
     onShowAppInfo: () -> Unit,
-    onPanicClear: () -> Unit,
-    onLocationChannelsClick: () -> Unit,
-    onLocationNotesClick: () -> Unit
+    onPanicClear: () -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val locationManager = remember { com.bitchat.android.geohash.LocationChannelManager.getInstance(context) }
-    
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -446,13 +410,7 @@ private fun ChatFloatingHeader(
                     },
                     onSidebarClick = onSidebarToggle,
                     onTripleClick = onPanicClear,
-                    onShowAppInfo = onShowAppInfo,
-                    onLocationChannelsClick = onLocationChannelsClick,
-                    onLocationNotesClick = {
-                        // Ensure location is loaded before showing sheet
-                        locationManager.refreshChannels()
-                        onLocationNotesClick()
-                    }
+                    onShowAppInfo = onShowAppInfo
                 )
             },
             colors = TopAppBarDefaults.topAppBarColors(
@@ -474,10 +432,6 @@ private fun ChatDialogs(
     onPasswordDismiss: () -> Unit,
     showAppInfo: Boolean,
     onAppInfoDismiss: () -> Unit,
-    showLocationChannelsSheet: Boolean,
-    onLocationChannelsSheetDismiss: () -> Unit,
-    showLocationNotesSheet: Boolean,
-    onLocationNotesSheetDismiss: () -> Unit,
     showUserSheet: Boolean,
     onUserSheetDismiss: () -> Unit,
     selectedUserForSheet: String,
@@ -516,24 +470,7 @@ private fun ChatDialogs(
             meshService = viewModel.meshService
         )
     }
-    
-    // Location channels sheet
-    if (showLocationChannelsSheet) {
-        LocationChannelsSheet(
-            isPresented = showLocationChannelsSheet,
-            onDismiss = onLocationChannelsSheetDismiss,
-            viewModel = viewModel
-        )
-    }
-    
-    // Location notes sheet (extracted to separate presenter)
-    if (showLocationNotesSheet) {
-        LocationNotesSheetPresenter(
-            viewModel = viewModel,
-            onDismiss = onLocationNotesSheetDismiss
-        )
-    }
-    
+
     // User action sheet
     if (showUserSheet) {
         ChatUserSheet(

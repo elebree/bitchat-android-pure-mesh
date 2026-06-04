@@ -7,7 +7,6 @@ import com.bitchat.android.identity.SecureIdentityStateManager
 import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.noise.NoiseSession
-import com.bitchat.android.nostr.GeohashAliasRegistry
 import com.bitchat.android.services.VerificationService
 import com.bitchat.android.util.dataFromHexString
 import com.bitchat.android.util.hexEncodedString
@@ -49,7 +48,6 @@ class VerificationHandler(
     }
 
     fun isPeerVerified(peerID: String): Boolean {
-        if (peerID.startsWith("nostr_") || peerID.startsWith("nostr:")) return false
         val fingerprint = getPeerFingerprintForDisplay(peerID)
         return fingerprint != null && _verifiedFingerprints.value.contains(fingerprint)
     }
@@ -203,30 +201,6 @@ class VerificationHandler(
                         null
                     }
                     favorite?.peerNoisePublicKey?.let { fingerprintFromNoiseBytes(it) }
-                }
-                peerID.startsWith("nostr_") -> {
-                    val pubHex = GeohashAliasRegistry.get(peerID)
-                    val noiseKey = pubHex?.let {
-                        FavoritesPersistenceService.shared.findNoiseKey(it)
-                    }
-                    noiseKey?.let {
-                        val noiseHex = it.hexEncodedString()
-                        identityManager.getCachedNoiseFingerprint(noiseHex) ?: fingerprintFromNoiseBytes(it)
-                    }
-                }
-                peerID.startsWith("nostr:") -> {
-                    val prefix = peerID.removePrefix("nostr:").lowercase()
-                    val pubHex = GeohashAliasRegistry
-                        .snapshot()
-                        .values
-                        .firstOrNull { it.lowercase().startsWith(prefix) }
-                    val noiseKey = pubHex?.let {
-                        FavoritesPersistenceService.shared.findNoiseKey(it)
-                    }
-                    noiseKey?.let {
-                        val noiseHex = it.hexEncodedString()
-                        identityManager.getCachedNoiseFingerprint(noiseHex) ?: fingerprintFromNoiseBytes(it)
-                    }
                 }
                 else -> {
                     val meshFp = meshService.getPeerFingerprint(peerID)

@@ -58,11 +58,6 @@ class PrivateChatManager(
         // Establish Noise session if needed before starting the chat
         establishNoiseSessionIfNeeded(peerID, meshService)
 
-        // Consolidate any temporary Nostr conversation for this peer into the stable/current peerID
-        try {
-            consolidateNostrTempConversationIfNeeded(peerID)
-        } catch (_: Exception) { }
-
         state.setSelectedPrivateChatPeer(peerID)
 
         // Clear unread
@@ -299,15 +294,6 @@ class PrivateChatManager(
                 // Ensure chat exists
                 messageManager.initializePrivateChat(senderPeerID)
 
-                // Exception: Nostr messages (nostr_ prefix) originate in Kotlin layer and MUST be added here.
-                if (senderPeerID.startsWith("nostr_")) {
-                    if (suppressUnread) {
-                        messageManager.addPrivateMessageNoUnread(senderPeerID, message)
-                    } else {
-                        messageManager.addPrivateMessage(senderPeerID, message)
-                    }
-                }
-
                 // Track as unread for read receipt purposes if not focused
                 if (!suppressUnread && state.getSelectedPrivateChatPeerValue() != senderPeerID) {
                     val unreadList = unreadReceivedMessages.getOrPut(senderPeerID) { mutableListOf() }
@@ -320,7 +306,7 @@ class PrivateChatManager(
             }
             return
         }
-        // Non-mesh path (e.g., Nostr): add to UI state using existing logic
+        // Non-mesh fallback: add to the selected chat if one is active.
         val inferredPeer = state.getSelectedPrivateChatPeerValue() ?: return
         if (suppressUnread) {
             messageManager.addPrivateMessageNoUnread(inferredPeer, message)
@@ -419,70 +405,6 @@ class PrivateChatManager(
 
     private fun getPeerNickname(peerID: String, meshService: BluetoothMeshService): String {
         return meshService.getPeerNicknames()[peerID] ?: peerID
-    }
-
-    // MARK: - Consolidation
-
-    private fun consolidateNostrTempConversationIfNeeded(targetPeerID: String) {
-        // If target is a mesh/noise-based peerID, merge any messages from its temp Nostr key
-        if (targetPeerID.startsWith("nostr_")) return
-
-        // Find favorites mapping and corresponding temp key
-        val tryMergeKeys = mutableListOf<String>()
-
-        // If we know the sender's Nostr pubkey for this peer via favorites, derive temp key
-        try {
-            val noiseKeyBytes = targetPeerID.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-            val npub = com.bitchat.android.favorites.FavoritesPersistenceService.shared.findNostrPubkey(noiseKeyBytes)
-            if (npub != null) {
-                // Normalize to hex to match how we formed temp keys (nostr_<pub16>)
-                val (hrp, data) = com.bitchat.android.nostr.Bech32.decode(npub)
-                if (hrp == "npub") {
-                    val pubHex = data.joinToString("") { "%02x".format(it) }
-                    tryMergeKeys.add("nostr_${pubHex.take(16)}")
-                }
-            }
-        } catch (_: Exception) { }
-
-        // Also merge any directly-addressed temp key used by incoming messages (without mapping yet)
-        // Search existing chats for keys that begin with "nostr_" and have messages from the same nickname
-        state.getPrivateChatsValue().keys.filter { it.startsWith("nostr_") }.forEach { tempKey ->
-            if (!tryMergeKeys.contains(tempKey)) tryMergeKeys.add(tempKey)
-        }
-
-        if (tryMergeKeys.isEmpty()) return
-
-        val currentChats = state.getPrivateChatsValue().toMutableMap()
-        val targetList = currentChats[targetPeerID]?.toMutableList() ?: mutableListOf()
-
-        var didMerge = false
-        tryMergeKeys.forEach { tempKey ->
-            val tempList = currentChats[tempKey]
-            if (!tempList.isNullOrEmpty()) {
-                targetList.addAll(tempList)
-                currentChats.remove(tempKey)
-                didMerge = true
-            }
-        }
-
-        if (didMerge) {
-            currentChats[targetPeerID] = targetList
-            state.setPrivateChats(currentChats)
-
-            // Also remove unread flag from temp keys and apply to target
-            val unread = state.getUnreadPrivateMessagesValue().toMutableSet()
-            val hadUnread = tryMergeKeys.any { unread.remove(it) }
-            if (hadUnread) {
-                unread.add(targetPeerID)
-                state.setUnreadPrivateMessages(unread)
-            }
-
-            // If we're currently viewing one of the temp aliases in the sheet, switch to the permanent ID
-            val sheetPeer = state.getPrivateChatSheetPeerValue()
-            if (sheetPeer != null && tryMergeKeys.contains(sheetPeer)) {
-                state.setPrivateChatSheetPeer(targetPeerID)
-            }
-        }
     }
 
     // MARK: - Emergency Clear

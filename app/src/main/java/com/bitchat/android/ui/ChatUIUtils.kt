@@ -262,10 +262,6 @@ fun formatMessageHeaderAnnotatedString(
 fun getPeerColor(message: BitchatMessage, isDark: Boolean): Color {
     // Create seed from peer identifier (prioritizing stable keys)
     val seed = when {
-        message.senderPeerID?.startsWith("nostr:") == true || message.senderPeerID?.startsWith("nostr_") == true -> {
-            // For Nostr peers, use the full key if available, otherwise the peer ID
-            "nostr:${message.senderPeerID.lowercase()}"
-        }
         message.senderPeerID?.length == 16 -> {
             // For ephemeral peer IDs, try to get stable Noise key, fallback to peer ID  
             "noise:${message.senderPeerID.lowercase()}"
@@ -369,16 +365,6 @@ private fun appendIOSFormattedContent(
         allMatches.add(match.range to "mention") 
     }
 
-    // Add standalone geohash matches (e.g., "#9q") that are not part of another word
-    // We use MessageSpecialParser to find exact ranges; then merge with existing ranges avoiding overlaps
-    val geoMatches = MessageSpecialParser.findStandaloneGeohashes(content)
-    for (gm in geoMatches) {
-        val range = gm.start until gm.endExclusive
-        if (!overlapsMention(range)) {
-            allMatches.add(range to "geohash")
-        }
-    }
-
     // Add URL matches (http/https/www/bare domains). Exclude overlaps with mentions.
     val urlMatches = MessageSpecialParser.findUrls(content)
     for (um in urlMatches) {
@@ -388,20 +374,16 @@ private fun appendIOSFormattedContent(
         }
     }
 
-    // Remove generic hashtag matches that overlap with detected geohash ranges to avoid duplicate rendering
     fun rangesOverlap(a: IntRange, b: IntRange): Boolean {
         return a.first < b.last && a.last > b.first
     }
     val urlRanges = allMatches.filter { it.second == "url" }.map { it.first }
-    val geoRanges = allMatches.filter { it.second == "geohash" }.map { it.first }
-    if (geoRanges.isNotEmpty() || urlRanges.isNotEmpty()) {
+    if (urlRanges.isNotEmpty()) {
         val iterator = allMatches.listIterator()
         while (iterator.hasNext()) {
             val (range, type) = iterator.next()
-            // Remove generic hashtags that overlap with geohashes, and geohashes that overlap with URLs
-            val overlapsGeo = geoRanges.any { rangesOverlap(range, it) }
             val overlapsUrl = urlRanges.any { rangesOverlap(range, it) }
-            if ((type == "hashtag" && overlapsGeo) || (type == "geohash" && overlapsUrl)) iterator.remove()
+            if (type == "hashtag" && overlapsUrl) iterator.remove()
         }
     }
     
@@ -490,26 +472,7 @@ private fun appendIOSFormattedContent(
                 builder.pop()
             }
             else -> {
-                if (type == "geohash") {
-                    // Style geohash in blue, underlined, and add click annotation
-                    builder.pushStyle(SpanStyle(
-                        color = Color(0xFF007AFF),
-                        fontSize = BASE_FONT_SIZE.sp,
-                        fontWeight = if (isSelf) FontWeight.Bold else FontWeight.SemiBold,
-                        textDecoration = TextDecoration.Underline
-                    ))
-                    val start = builder.length
-                    builder.append(matchText)
-                    val end = builder.length
-                    val geohash = matchText.removePrefix("#").lowercase()
-                    builder.addStringAnnotation(
-                        tag = "geohash_click",
-                        annotation = geohash,
-                        start = start,
-                        end = end
-                    )
-                    builder.pop()
-                } else if (type == "url") {
+                if (type == "url") {
                     // Style URL in blue, underlined, and add click annotation with the raw text
                     builder.pushStyle(SpanStyle(
                         color = Color(0xFF007AFF),

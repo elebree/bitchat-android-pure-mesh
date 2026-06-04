@@ -162,7 +162,7 @@ class MeshForegroundService : Service() {
                 try { stopForeground(true) } catch (_: Exception) { }
                 notificationManager.cancel(NOTIFICATION_ID)
                 isInForeground = false
-                // Fully stop all background activity, stop Tor (without changing setting), then kill the app
+                // Fully stop all background activity, then kill the app.
                 AppShutdownCoordinator.requestFullShutdownAndKill(
                     app = application,
                     mesh = meshService,

@@ -14,7 +14,6 @@ import com.bitchat.android.mesh.BluetoothMeshService
 import com.bitchat.android.service.MeshServiceHolder
 import com.bitchat.android.model.BitchatMessage
 import com.bitchat.android.model.BitchatMessageType
-import com.bitchat.android.nostr.NostrIdentityBridge
 import com.bitchat.android.protocol.BitchatPacket
 
 
@@ -27,7 +26,6 @@ import kotlin.random.Random
 import com.bitchat.android.services.VerificationService
 import com.bitchat.android.identity.SecureIdentityStateManager
 import com.bitchat.android.noise.NoiseSession
-import com.bitchat.android.nostr.GeohashAliasRegistry
 import com.bitchat.android.util.dataFromHexString
 import com.bitchat.android.util.hexEncodedString
 import java.security.MessageDigest
@@ -63,13 +61,7 @@ class ChatViewModel(
     }
 
     fun getCurrentNpub(): String? {
-        return try {
-            NostrIdentityBridge
-                .getCurrentNostrIdentity(getApplication())
-                ?.npub
-        } catch (_: Exception) {
-            null
-        }
+        return null
     }
 
     fun buildMyQRString(nickname: String, npub: String?): String {
@@ -133,21 +125,6 @@ class ChatViewModel(
         getMeshService = { meshService }
     )
     
-    // New Geohash architecture ViewModel (replaces God object service usage in UI path)
-    val geohashViewModel = GeohashViewModel(
-        application = application,
-        state = state,
-        messageManager = messageManager,
-        privateChatManager = privateChatManager,
-        meshDelegateHandler = meshDelegateHandler,
-        dataManager = dataManager,
-        notificationManager = notificationManager
-    )
-
-
-
-
-
     val messages: StateFlow<List<BitchatMessage>> = state.messages
     val connectedPeers: StateFlow<List<String>> = state.connectedPeers
     val nickname: StateFlow<String> = state.nickname
@@ -179,12 +156,6 @@ class ChatViewModel(
     val privateChatSheetPeer: StateFlow<String?> = state.privateChatSheetPeer
     val showVerificationSheet: StateFlow<Boolean> = state.showVerificationSheet
     val showSecurityVerificationSheet: StateFlow<Boolean> = state.showSecurityVerificationSheet
-    val selectedLocationChannel: StateFlow<com.bitchat.android.geohash.ChannelID?> = state.selectedLocationChannel
-    val isTeleported: StateFlow<Boolean> = state.isTeleported
-    val geohashPeople: StateFlow<List<GeoPerson>> = state.geohashPeople
-    val teleportedGeo: StateFlow<Set<String>> = state.teleportedGeo
-    val geohashParticipantCounts: StateFlow<Map<String, Int>> = state.geohashParticipantCounts
-
     init {
         // Note: Mesh service delegate is now set by MainActivity
         loadAndInitialize()
@@ -261,7 +232,6 @@ class ChatViewModel(
         dataManager.loadFavorites()
         state.setFavoritePeers(dataManager.favoritePeers.toSet())
         dataManager.loadBlockedUsers()
-        dataManager.loadGeohashBlockedUsers()
 
         // Log all favorites at startup
         dataManager.logAllFavorites()
@@ -274,20 +244,13 @@ class ChatViewModel(
         viewModelScope.launch {
             com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().debugMessages.collect { msgs ->
                 if (com.bitchat.android.ui.debug.DebugSettingsManager.getInstance().verboseLoggingEnabled.value) {
-                    // Only show debug logs in the Mesh chat timeline to avoid leaking into geohash chats
-                    val selectedLocation = state.selectedLocationChannel.value
-                    if (selectedLocation is com.bitchat.android.geohash.ChannelID.Mesh) {
-                        // Append only latest debug message as system message to avoid flooding
-                        msgs.lastOrNull()?.let { dm ->
-                            messageManager.addSystemMessage(dm.content)
-                        }
+                    // Append only latest debug message as system message to avoid flooding
+                    msgs.lastOrNull()?.let { dm ->
+                        messageManager.addSystemMessage(dm.content)
                     }
                 }
             }
         }
-        
-        // Initialize new geohash architecture
-        geohashViewModel.initialize()
 
         // Initialize favorites persistence service
         com.bitchat.android.favorites.FavoritesPersistenceService.initialize(getApplication())
@@ -296,15 +259,9 @@ class ChatViewModel(
         verificationHandler.loadVerifiedFingerprints()
 
 
-        // Ensure NostrTransport knows our mesh peer ID for embedded packets
-        try {
-            val nostrTransport = com.bitchat.android.nostr.NostrTransport.getInstance(getApplication())
-            nostrTransport.senderPeerID = meshService.myPeerID
-        } catch (_: Exception) { }
-
         // Note: Mesh service is now started by MainActivity
 
-        // BLE receives are inserted by MessageHandler path; no VoiceNoteBus for Tor in this branch.
+        // BLE receives are inserted by MessageHandler path.
     }
     
     override fun onCleared() {
@@ -320,46 +277,6 @@ class ChatViewModel(
         meshService.sendBroadcastAnnounce()
     }
     
-    /**
-     * Ensure Nostr DM subscription for a geohash conversation key if known
-     * Minimal-change approach: reflectively access GeohashViewModel internals to reuse pipeline
-     */
-    private fun ensureGeohashDMSubscriptionIfNeeded(convKey: String) {
-        try {
-            val repoField = GeohashViewModel::class.java.getDeclaredField("repo")
-            repoField.isAccessible = true
-            val repo = repoField.get(geohashViewModel) as com.bitchat.android.nostr.GeohashRepository
-            val gh = repo.getConversationGeohash(convKey)
-            if (!gh.isNullOrEmpty()) {
-                val subMgrField = GeohashViewModel::class.java.getDeclaredField("subscriptionManager")
-                subMgrField.isAccessible = true
-                val subMgr = subMgrField.get(geohashViewModel) as com.bitchat.android.nostr.NostrSubscriptionManager
-                val identity = com.bitchat.android.nostr.NostrIdentityBridge.deriveIdentity(gh, getApplication())
-                val subId = "geo-dm-$gh"
-                val currentDmSubField = GeohashViewModel::class.java.getDeclaredField("currentDmSubId")
-                currentDmSubField.isAccessible = true
-                val currentId = currentDmSubField.get(geohashViewModel) as String?
-                if (currentId != subId) {
-                    (currentId)?.let { subMgr.unsubscribe(it) }
-                    currentDmSubField.set(geohashViewModel, subId)
-                    subMgr.subscribeGiftWraps(
-                        pubkey = identity.publicKeyHex,
-                        sinceMs = System.currentTimeMillis() - 172800000L,
-                        id = subId,
-                        handler = { event ->
-                            val dmHandlerField = GeohashViewModel::class.java.getDeclaredField("dmHandler")
-                            dmHandlerField.isAccessible = true
-                            val dmHandler = dmHandlerField.get(geohashViewModel) as com.bitchat.android.nostr.NostrDirectMessageHandler
-                            dmHandler.onGiftWrap(event, gh, identity)
-                        }
-                    )
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "ensureGeohashDMSubscriptionIfNeeded failed: ${e.message}")
-        }
-    }
-
     // MARK: - Channel Management (delegated)
     
     fun joinChannel(channel: String, password: String? = null): Boolean {
@@ -378,11 +295,6 @@ class ChatViewModel(
     // MARK: - Private Chat Management (delegated)
     
     fun startPrivateChat(peerID: String) {
-        // For geohash conversation keys, ensure DM subscription is active
-        if (peerID.startsWith("nostr_")) {
-            ensureGeohashDMSubscriptionIfNeeded(peerID)
-        }
-        
         val success = privateChatManager.startPrivateChat(peerID, meshService)
         if (success) {
             // Notify notification manager about current private chat
@@ -390,8 +302,7 @@ class ChatViewModel(
             // Clear notifications for this sender since user is now viewing the chat
             clearNotificationsForSender(peerID)
 
-            // Persistently mark all messages in this conversation as read so Nostr fetches
-            // after app restarts won't re-mark them as unread.
+            // Persistently mark all messages in this conversation as read.
             try {
                 val seen = com.bitchat.android.services.SeenMessageStore.getInstance(getApplication())
                 val chats = state.getPrivateChatsValue()
@@ -442,22 +353,12 @@ class ChatViewModel(
 
             val targetKey = bestKey ?: unreadKeys.firstOrNull() ?: return
 
-            val openPeer: String = if (targetKey.startsWith("nostr_")) {
-                // Use the exact conversation key for geohash DMs and ensure DM subscription
-                ensureGeohashDMSubscriptionIfNeeded(targetKey)
-                targetKey
-            } else {
-                // Resolve to a canonical mesh peer if needed
-                val canonical = com.bitchat.android.services.ConversationAliasResolver.resolveCanonicalPeerID(
-                    selectedPeerID = targetKey,
-                    connectedPeers = state.getConnectedPeersValue(),
-                    meshNoiseKeyForPeer = { pid -> meshService.getPeerInfo(pid)?.noisePublicKey },
-                    meshHasPeer = { pid -> meshService.getPeerInfo(pid)?.isConnected == true },
-                    nostrPubHexForAlias = { alias -> com.bitchat.android.nostr.GeohashAliasRegistry.get(alias) },
-                    findNoiseKeyForNostr = { key -> com.bitchat.android.favorites.FavoritesPersistenceService.shared.findNoiseKey(key) }
-                )
-                canonical ?: targetKey
-            }
+            val openPeer = com.bitchat.android.services.ConversationAliasResolver.resolveCanonicalPeerID(
+                selectedPeerID = targetKey,
+                connectedPeers = state.getConnectedPeersValue(),
+                meshNoiseKeyForPeer = { pid -> meshService.getPeerInfo(pid)?.noisePublicKey },
+                meshHasPeer = { pid -> meshService.getPeerInfo(pid)?.isConnected == true }
+            )
 
             showPrivateChatSheet(openPeer)
         } catch (e: Exception) {
@@ -475,20 +376,8 @@ class ChatViewModel(
         
         // Check for commands
         if (content.startsWith("/")) {
-            val selectedLocationForCommand = state.selectedLocationChannel.value
             commandProcessor.processCommand(content, meshService, meshService.myPeerID, { messageContent, mentions, channel ->
-                if (selectedLocationForCommand is com.bitchat.android.geohash.ChannelID.Location) {
-                    // Route command-generated public messages via Nostr in geohash channels
-                    geohashViewModel.sendGeohashMessage(
-                        messageContent,
-                        selectedLocationForCommand.channel,
-                        meshService.myPeerID,
-                        state.getNicknameValue()
-                    )
-                } else {
-                    // Default: route via mesh
-                    meshService.sendMessage(messageContent, mentions, channel)
-                }
+                meshService.sendMessage(messageContent, mentions, channel)
             })
             return
         }
@@ -501,14 +390,12 @@ class ChatViewModel(
         val currentChannelValue = state.getCurrentChannelValue()
         
         if (selectedPeer != null) {
-            // If the selected peer is a temporary Nostr alias or a noise-hex identity, resolve to a canonical target
+            // If the selected peer is a stable noise-hex identity, resolve to a canonical mesh target when online.
             selectedPeer = com.bitchat.android.services.ConversationAliasResolver.resolveCanonicalPeerID(
                 selectedPeerID = selectedPeer,
                 connectedPeers = state.getConnectedPeersValue(),
                 meshNoiseKeyForPeer = { pid -> meshService.getPeerInfo(pid)?.noisePublicKey },
-                meshHasPeer = { pid -> meshService.getPeerInfo(pid)?.isConnected == true },
-                nostrPubHexForAlias = { alias -> com.bitchat.android.nostr.GeohashAliasRegistry.get(alias) },
-                findNoiseKeyForNostr = { key -> com.bitchat.android.favorites.FavoritesPersistenceService.shared.findNoiseKey(key) }
+                meshHasPeer = { pid -> meshService.getPeerInfo(pid)?.isConnected == true }
             ).also { canonical ->
                 if (canonical != state.getSelectedPrivateChatPeerValue()) {
                     privateChatManager.startPrivateChat(canonical, meshService)
@@ -527,54 +414,47 @@ class ChatViewModel(
                 state.getNicknameValue(),
                 meshService.myPeerID
             ) { messageContent, peerID, recipientNicknameParam, messageId ->
-                // Route via MessageRouter (mesh when connected+established, else Nostr)
+                // Route via mesh, queueing until a Noise session is established if needed.
                 val router = com.bitchat.android.services.MessageRouter.getInstance(getApplication(), meshService)
                 router.sendPrivate(messageContent, peerID, recipientNicknameParam, messageId)
             }
         } else {
-            // Check if we're in a location channel
-            val selectedLocationChannel = state.selectedLocationChannel.value
-            if (selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location) {
-                // Send to geohash channel via Nostr ephemeral event
-                geohashViewModel.sendGeohashMessage(content, selectedLocationChannel.channel, meshService.myPeerID, state.getNicknameValue())
-            } else {
-                // Send public/channel message via mesh
-                val message = BitchatMessage(
-                    sender = state.getNicknameValue() ?: meshService.myPeerID,
-                    content = content,
-                    timestamp = Date(),
-                    isRelay = false,
-                    senderPeerID = meshService.myPeerID,
-                    mentions = if (mentions.isNotEmpty()) mentions else null,
-                    channel = currentChannelValue
-                )
+            // Send public/channel message via mesh
+            val message = BitchatMessage(
+                sender = state.getNicknameValue() ?: meshService.myPeerID,
+                content = content,
+                timestamp = Date(),
+                isRelay = false,
+                senderPeerID = meshService.myPeerID,
+                mentions = if (mentions.isNotEmpty()) mentions else null,
+                channel = currentChannelValue
+            )
 
-                if (currentChannelValue != null) {
-                    channelManager.addChannelMessage(currentChannelValue, message, meshService.myPeerID)
+            if (currentChannelValue != null) {
+                channelManager.addChannelMessage(currentChannelValue, message, meshService.myPeerID)
 
-                    // Check if encrypted channel
-                    if (channelManager.hasChannelKey(currentChannelValue)) {
-                        channelManager.sendEncryptedChannelMessage(
-                            content,
-                            mentions,
-                            currentChannelValue,
-                            state.getNicknameValue(),
-                            meshService.myPeerID,
-                            onEncryptedPayload = { encryptedData ->
-                                // This would need proper mesh service integration
-                                meshService.sendMessage(content, mentions, currentChannelValue)
-                            },
-                            onFallback = {
-                                meshService.sendMessage(content, mentions, currentChannelValue)
-                            }
-                        )
-                    } else {
-                        meshService.sendMessage(content, mentions, currentChannelValue)
-                    }
+                // Check if encrypted channel
+                if (channelManager.hasChannelKey(currentChannelValue)) {
+                    channelManager.sendEncryptedChannelMessage(
+                        content,
+                        mentions,
+                        currentChannelValue,
+                        state.getNicknameValue(),
+                        meshService.myPeerID,
+                        onEncryptedPayload = {
+                            // This would need proper mesh service integration
+                            meshService.sendMessage(content, mentions, currentChannelValue)
+                        },
+                        onFallback = {
+                            meshService.sendMessage(content, mentions, currentChannelValue)
+                        }
+                    )
                 } else {
-                    messageManager.addMessage(message)
-                    meshService.sendMessage(content, mentions, null)
+                    meshService.sendMessage(content, mentions, currentChannelValue)
                 }
+            } else {
+                messageManager.addMessage(message)
+                meshService.sendMessage(content, mentions, null)
             }
         }
     }
@@ -623,23 +503,16 @@ class ChatViewModel(
                     isFavorite = isNowFavorite
                 )
 
-                // Send favorite notification via mesh or Nostr with our npub if available
+                // Send favorite notification over mesh if the peer has an established session.
                 try {
-                    val myNostr = com.bitchat.android.nostr.NostrIdentityBridge.getCurrentNostrIdentity(getApplication())
-                    val announcementContent = if (isNowFavorite) "[FAVORITED]:${myNostr?.npub ?: ""}" else "[UNFAVORITED]:${myNostr?.npub ?: ""}"
-                    // Prefer mesh if session established, else try Nostr
+                    val announcementContent = if (isNowFavorite) "[FAVORITED]:" else "[UNFAVORITED]:"
                     if (meshService.hasEstablishedSession(peerID)) {
-                        // Reuse existing private message path for notifications
                         meshService.sendPrivateMessage(
                             announcementContent,
                             peerID,
                             nickname,
                             java.util.UUID.randomUUID().toString()
                         )
-                    } else {
-                        val nostrTransport = com.bitchat.android.nostr.NostrTransport.getInstance(getApplication())
-                        nostrTransport.senderPeerID = meshService.myPeerID
-                        nostrTransport.sendFavoriteNotification(peerID, isNowFavorite)
                     }
                 } catch (_: Exception) { }
             }
@@ -668,8 +541,6 @@ class ChatViewModel(
             }
         }
     }
-    
-    // Location notes subscription management moved to LocationNotesViewModelExtensions.kt
     
     /**
      * Update reactive states for all connected peers (session states, fingerprints, nicknames, RSSI)
@@ -733,7 +604,6 @@ class ChatViewModel(
     // MARK: - QR Verification
     
     fun isPeerVerified(peerID: String, verifiedFingerprints: Set<String>): Boolean {
-        if (peerID.startsWith("nostr_") || peerID.startsWith("nostr:")) return false
         val fingerprint = verificationHandler.getPeerFingerprintForDisplay(peerID)
         return fingerprint != null && verifiedFingerprints.contains(fingerprint)
     }
@@ -761,16 +631,8 @@ class ChatViewModel(
         notificationManager.setCurrentPrivateChatPeer(peerID)
     }
     
-    fun setCurrentGeohash(geohash: String?) {
-        notificationManager.setCurrentGeohash(geohash)
-    }
-
     fun clearNotificationsForSender(peerID: String) {
         notificationManager.clearNotificationsForSender(peerID)
-    }
-    
-    fun clearNotificationsForGeohash(geohash: String) {
-        notificationManager.clearNotificationsForGeohash(geohash)
     }
 
     fun clearMeshMentionNotifications() {
@@ -930,19 +792,6 @@ class ChatViewModel(
         // Clear all media files
         com.bitchat.android.features.file.FileUtils.clearAllMedia(getApplication())
         
-        // Clear Nostr/geohash state, keys, connections, bookmarks, and reinitialize from scratch
-        try {
-            // Clear geohash bookmarks too (panic should remove everything)
-            try {
-                val store = com.bitchat.android.geohash.GeohashBookmarksStore.getInstance(getApplication())
-                store.clearAll()
-            } catch (_: Exception) { }
-
-            geohashViewModel.panicReset()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to reset Nostr/geohash: ${e.message}")
-        }
-
         // Reset nickname
         val newNickname = "anon${Random.nextInt(1000, 9999)}"
         state.setNickname(newNickname)
@@ -1028,66 +877,6 @@ class ChatViewModel(
         }
     }
 
-    /**
-     * Get participant count for a specific geohash (5-minute activity window)
-     */
-    fun geohashParticipantCount(geohash: String): Int {
-        return geohashViewModel.geohashParticipantCount(geohash)
-    }
-
-    /**
-     * Begin sampling multiple geohashes for participant activity
-     */
-    fun beginGeohashSampling(geohashes: List<String>) {
-        geohashViewModel.beginGeohashSampling(geohashes)
-    }
-
-    /**
-     * End geohash sampling
-     */
-    fun endGeohashSampling() {
-        geohashViewModel.endGeohashSampling()
-    }
-
-    /**
-     * Check if a geohash person is teleported (iOS-compatible)
-     */
-    fun isPersonTeleported(pubkeyHex: String): Boolean {
-        return geohashViewModel.isPersonTeleported(pubkeyHex)
-    }
-
-    /**
-     * Start geohash DM with pubkey hex (iOS-compatible)
-     */
-    fun startGeohashDM(pubkeyHex: String) {
-        geohashViewModel.startGeohashDM(pubkeyHex) { convKey ->
-            showPrivateChatSheet(convKey)
-        }
-    }
-
-    fun startGeohashDMByNickname(nickname: String) {
-        geohashViewModel.startGeohashDMByNickname(nickname) { convKey ->
-            showPrivateChatSheet(convKey)
-        }
-    }
-
-    fun startGeohashDMByShortId(shortId: String) {
-        geohashViewModel.startGeohashDMByShortId(shortId) { convKey ->
-            showPrivateChatSheet(convKey)
-        }
-    }
-
-    fun selectLocationChannel(channel: com.bitchat.android.geohash.ChannelID) {
-        geohashViewModel.selectLocationChannel(channel)
-    }
-
-    /**
-     * Block a user in geohash channels by their nickname
-     */
-    fun blockUserInGeohash(targetNickname: String) {
-        geohashViewModel.blockUserInGeohash(targetNickname)
-    }
-
     // MARK: - Navigation Management
     
     fun showAppInfo() {
@@ -1140,12 +929,5 @@ class ChatViewModel(
         val seed = "noise:${peerID.lowercase()}"
         return colorForPeerSeed(seed, isDark).copy()
     }
-
-    /**
-     * Get consistent color for a Nostr pubkey (iOS-compatible)
-     */
-    fun colorForNostrPubkey(pubkeyHex: String, isDark: Boolean): androidx.compose.ui.graphics.Color {
-        return geohashViewModel.colorForNostrPubkey(pubkeyHex, isDark)
-}
 
 }

@@ -539,12 +539,11 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
 
     /**
      * Handle favorite/unfavorite notification received over mesh as a private message.
-     * Content format: "[FAVORITED]:npub..." or "[UNFAVORITED]:npub..."
+     * Content format: "[FAVORITED]:" or "[UNFAVORITED]:"
      */
     private fun handleFavoriteNotificationFromMesh(content: String, fromPeerID: String) {
         try {
             val isFavorite = content.startsWith("[FAVORITED]")
-            val npub = content.substringAfter(":", "").trim().takeIf { it.startsWith("npub1") }
 
             // Update mutual favorite status in persistence
             // Resolve full Noise key if available via delegate peer info
@@ -552,22 +551,17 @@ class MessageHandler(private val myPeerID: String, private val appContext: andro
             val noiseKey = peerInfo?.noisePublicKey
             if (noiseKey != null) {
                 com.bitchat.android.favorites.FavoritesPersistenceService.shared.updatePeerFavoritedUs(noiseKey, isFavorite)
-                if (npub != null) {
-                    // Index by noise key and current mesh peerID for fast Nostr routing
-                    com.bitchat.android.favorites.FavoritesPersistenceService.shared.updateNostrPublicKey(noiseKey, npub)
-                    com.bitchat.android.favorites.FavoritesPersistenceService.shared.updateNostrPublicKeyForPeerID(fromPeerID, npub)
-                }
 
-                // Determine iOS-style guidance text
+                // Determine guidance text
                 val rel = com.bitchat.android.favorites.FavoritesPersistenceService.shared.getFavoriteStatus(noiseKey)
                 val guidance = if (isFavorite) {
                     if (rel?.isFavorite == true) {
-                        " — mutual! You can continue DMs via Nostr when out of mesh."
+                        " — mutual favorite."
                     } else {
-                        " — favorite back to continue DMs later."
+                        " — favorite back to mark as mutual."
                     }
                 } else {
-                    ". DMs over Nostr will pause unless you both favorite again."
+                    "."
                 }
 
                 // Emit system message via delegate callback

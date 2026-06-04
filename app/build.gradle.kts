@@ -127,17 +127,12 @@ dependencies {
     // Bluetooth
     implementation(libs.nordic.ble)
 
-    // WebSocket
-    implementation(libs.okhttp)
+    // WebSocket and Tor dependencies removed for Bluetooth-only build
+    // implementation(libs.okhttp)
+    // implementation(libs.tor.android.binary)
 
-    // Arti (Tor in Rust) Android bridge - custom build from latest source
-    // Built with rustls, 16KB page size support, and onio//un service client
-    // Native libraries are in src/tor/jniLibs/ (extracted from arti-custom.aar)
-    // Only included in tor flavor to reduce APK size for standard builds
-    // Note: AAR is kept in libs/ for reference, but libraries loaded from jniLibs/
-
-    // Google Play Services Location
-    implementation(libs.gms.location)
+    // Google Play Services Location removed for Bluetooth-only build
+    // implementation(libs.gms.location)
 
     // Security preferences
     implementation(libs.androidx.security.crypto)

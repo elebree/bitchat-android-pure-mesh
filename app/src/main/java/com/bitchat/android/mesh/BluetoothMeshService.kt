@@ -365,13 +365,6 @@ class BluetoothMeshService(private val context: Context) {
                 // Store fingerprint for the peer via centralized fingerprint manager
                 val fingerprint = peerManager.storeFingerprintForPeer(newPeerID, publicKey)
 
-                // Index existing Nostr mapping by the new peerID if we have it
-                try {
-                    com.bitchat.android.favorites.FavoritesPersistenceService.shared.findNostrPubkey(publicKey)?.let { npub ->
-                        com.bitchat.android.favorites.FavoritesPersistenceService.shared.updateNostrPublicKeyForPeerID(newPeerID, npub)
-                    }
-                } catch (_: Exception) { }
-                
                 // If there was a previous peer ID, remove it to avoid duplicates
                 previousPeerID?.let { oldPeerID ->
                     peerManager.removePeer(oldPeerID)
@@ -915,17 +908,6 @@ class BluetoothMeshService(private val context: Context) {
     fun sendReadReceipt(messageID: String, recipientPeerID: String, readerNickname: String) {
         serviceScope.launch {
             Log.d(TAG, "📖 Sending read receipt for message $messageID to $recipientPeerID")
-
-            // Route geohash read receipts via MessageRouter instead of here
-            val geo = runCatching { com.bitchat.android.services.MessageRouter.tryGetInstance() }.getOrNull()
-            val isGeoAlias = try {
-                val map = com.bitchat.android.nostr.GeohashAliasRegistry.snapshot()
-                map.containsKey(recipientPeerID)
-            } catch (_: Exception) { false }
-            if (isGeoAlias && geo != null) {
-                geo.sendReadReceipt(com.bitchat.android.model.ReadReceipt(messageID), recipientPeerID)
-                return@launch
-            }
 
             try {
                 // Avoid duplicate read receipts: check persistent store first

@@ -403,32 +403,6 @@ fun MessageItem(
                                 return@detectTapGestures
                             }
                         }
-                        // Geohash teleport (all messages)
-                        val geohashAnnotations = annotatedText.getStringAnnotations(
-                            tag = "geohash_click",
-                            start = offset,
-                            end = offset
-                        )
-                        if (geohashAnnotations.isNotEmpty()) {
-                            val geohash = geohashAnnotations.first().item
-                            try {
-                                val locationManager = com.bitchat.android.geohash.LocationChannelManager.getInstance(
-                                    context
-                                )
-                                val level = when (geohash.length) {
-                                    in 0..2 -> com.bitchat.android.geohash.GeohashChannelLevel.REGION
-                                    in 3..4 -> com.bitchat.android.geohash.GeohashChannelLevel.PROVINCE
-                                    5 -> com.bitchat.android.geohash.GeohashChannelLevel.CITY
-                                    6 -> com.bitchat.android.geohash.GeohashChannelLevel.NEIGHBORHOOD
-                                    else -> com.bitchat.android.geohash.GeohashChannelLevel.BLOCK
-                                }
-                                val channel = com.bitchat.android.geohash.GeohashChannel(level, geohash.lowercase())
-                                locationManager.setTeleported(true)
-                                locationManager.select(com.bitchat.android.geohash.ChannelID.Location(channel))
-                            } catch (_: Exception) { }
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            return@detectTapGestures
-                        }
                         // URL open (all messages)
                         val urlAnnotations = annotatedText.getStringAnnotations(
                             tag = "url_click",
