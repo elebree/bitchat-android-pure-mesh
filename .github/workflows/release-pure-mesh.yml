@@ -1,0 +1,123 @@
+name: Release Bitchat Pure Mesh
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*' # Triggers for tags like v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v3
+        with:
+          gradle-version: wrapper
+
+      - name: Cache Gradle files
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Grant execute permission for Gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build Release APKs (with architecture splits)
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Sign release APKs with debug certificate
+        run: |
+          set -euo pipefail
+
+          KEYSTORE="$RUNNER_TEMP/debug.keystore"
+          ASSET_DIR="$GITHUB_WORKSPACE/release-assets"
+          mkdir -p "$ASSET_DIR"
+
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+          BUILD_TOOLS_DIR="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+
+          for apk in app/build/outputs/apk/release/*.apk; do
+            file="$(basename "$apk")"
+            abi="$file"
+            abi="${abi#app-}"
+            abi="${abi%-release-unsigned.apk}"
+            abi="${abi%-release.apk}"
+            if [ "$file" = "app-release-unsigned.apk" ] || [ "$file" = "app-release.apk" ]; then
+              abi="universal"
+            fi
+
+            aligned="$RUNNER_TEMP/${file%.apk}-aligned.apk"
+            signed="$ASSET_DIR/bitchat-android-pure-mesh-${abi}-debug.apk"
+
+            "$ZIPALIGN" -f -p 4 "$apk" "$aligned"
+            "$APKSIGNER" sign \
+              --ks "$KEYSTORE" \
+              --ks-pass pass:android \
+              --key-pass pass:android \
+              --out "$signed" \
+              "$aligned"
+            "$APKSIGNER" verify --verbose "$signed"
+          done
+
+          echo "Signed APKs:"
+          ls -lh "$ASSET_DIR"
+
+      - name: Upload signed APKs as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitchat-android-pure-mesh-debug-${{ github.ref_name }}
+          path: release-assets/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download signed APK artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: bitchat-android-pure-mesh-debug-${{ github.ref_name }}
+          path: release
+
+      - name: Upload APKs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.apk
+          name: Release ${{ github.ref_name }}
+          append_body: true
+          body: |
+            APKs are built from the release variant, then signed with the Android debug certificate for install/testing convenience.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
