@@ -20,7 +20,7 @@ import com.bitchat.android.model.BitchatMessage
 
 /**
  * User Action Sheet for selecting actions on a specific user (slap, hug, block)
- * Design language matches LocationChannelsSheet.kt for consistency
+ * User Action Sheet for selecting actions on a specific user.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,7 +35,7 @@ fun ChatUserSheet(
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
     
-    // iOS system colors (matches LocationChannelsSheet exactly)
+    // iOS system colors
     val colorScheme = MaterialTheme.colorScheme
     val isDark = colorScheme.background.red + colorScheme.background.green + colorScheme.background.blue < 1.5f
     val standardGreen = if (isDark) Color(0xFF32D74B) else Color(0xFF248A3D) // iOS green
@@ -100,20 +100,9 @@ fun ChatUserSheet(
                                 subtitle = stringResource(R.string.action_private_message_subtitle),
                                 titleColor = standardPurple,
                                 onClick = {
-                                    val selectedLocationChannel = viewModel.selectedLocationChannel.value
-                                    if (selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location) {
-                                        if (selectedMessage?.senderPeerID?.startsWith("nostr:") == true) {
-                                            val shortId = selectedMessage.senderPeerID!!.substring(6)
-                                            viewModel.startGeohashDMByShortId(shortId)
-                                        } else {
-                                            viewModel.startGeohashDMByNickname(targetNickname)
-                                        }
-                                    } else {
-                                        // Mesh chat
-                                        val peerID = selectedMessage?.senderPeerID ?: viewModel.getPeerIDForNickname(targetNickname)
-                                        if (peerID != null) {
-                                            viewModel.showPrivateChatSheet(peerID)
-                                        }
+                                    val peerID = selectedMessage?.senderPeerID ?: viewModel.getPeerIDForNickname(targetNickname)
+                                    if (peerID != null) {
+                                        viewModel.showPrivateChatSheet(peerID)
                                     }
                                     onDismiss()
                                 }
@@ -155,15 +144,7 @@ fun ChatUserSheet(
                                 subtitle = stringResource(R.string.action_block_subtitle),
                                 titleColor = standardRed,
                                 onClick = {
-                                    // Check if we're in a geohash channel
-                                    val selectedLocationChannel = viewModel.selectedLocationChannel.value
-                                    if (selectedLocationChannel is com.bitchat.android.geohash.ChannelID.Location) {
-                                        // Get user's nostr public key and add to geohash block list
-                                        viewModel.blockUserInGeohash(targetNickname)
-                                    } else {
-                                        // Regular mesh blocking
-                                        viewModel.sendMessage("/block $targetNickname")
-                                    }
+                                    viewModel.sendMessage("/block $targetNickname")
                                     onDismiss()
                                 }
                             )

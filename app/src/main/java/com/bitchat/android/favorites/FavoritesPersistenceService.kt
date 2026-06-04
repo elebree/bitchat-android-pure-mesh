@@ -8,13 +8,13 @@ import com.google.gson.reflect.TypeToken
 import java.util.*
 
 /**
- * Bridging Noise and Nostr favorites
+ * Persists Noise-key based favorite relationships.
  * Direct port from iOS FavoritesPersistenceService.swift, with Android-specific
- * peerID (16-hex) -> npub indexing for Nostr DM routing.
+ * peerID (16-hex) indexing is retained for compatibility with existing stored data.
  */
 data class FavoriteRelationship(
     val peerNoisePublicKey: ByteArray,    // Noise static public key (32 bytes)
-    val peerNostrPublicKey: String?,      // npub bech32 string
+    val peerNostrPublicKey: String?,      // legacy field retained for stored JSON compatibility
     val peerNickname: String,
     val isFavorite: Boolean,              // We favorited them
     val theyFavoritedUs: Boolean,         // They favorited us
@@ -54,7 +54,7 @@ interface FavoritesChangeListener {
 }
 
 /**
- * Manages favorites with Noise↔Nostr mapping
+ * Manages favorite relationships.
  * Singleton pattern matching iOS implementation.
  */
 class FavoritesPersistenceService private constructor(private val context: Context) {
@@ -84,8 +84,7 @@ class FavoritesPersistenceService private constructor(private val context: Conte
     private val stateManager = SecureIdentityStateManager(context)
     private val gson = Gson()
     private val favorites = mutableMapOf<String, FavoriteRelationship>() // noiseHex -> relationship
-    // NEW: Index by current mesh peerID (16-hex) for direct lookup when sending Nostr DMs from mesh context
-    private val peerIdIndex = mutableMapOf<String, String>() // peerID (lowercase 16-hex) -> npub
+    private val peerIdIndex = mutableMapOf<String, String>() // peerID (lowercase 16-hex) -> legacy value
     private val listeners = mutableListOf<FavoritesChangeListener>()
 
     init {
@@ -109,55 +108,22 @@ class FavoritesPersistenceService private constructor(private val context: Conte
         return null
     }
 
-    /** Update Nostr public key for a peer (indexed by Noise key) */
+    /** Legacy no-op retained for compatibility with older callers. */
     fun updateNostrPublicKey(noisePublicKey: ByteArray, nostrPubkey: String) {
-        val keyHex = noisePublicKey.joinToString("") { "%02x".format(it) }
-        val existing = favorites[keyHex]
-
-        if (existing != null) {
-            val updated = existing.copy(
-                peerNostrPublicKey = nostrPubkey,
-                lastUpdated = Date()
-            )
-            favorites[keyHex] = updated
-        } else {
-            val relationship = FavoriteRelationship(
-                peerNoisePublicKey = noisePublicKey,
-                peerNostrPublicKey = nostrPubkey,
-                peerNickname = "Unknown",
-                isFavorite = false,
-                theyFavoritedUs = false,
-                favoritedAt = Date(),
-                lastUpdated = Date()
-            )
-            favorites[keyHex] = relationship
-        }
-
-        saveFavorites()
-        notifyChanged(keyHex)
-        Log.d(TAG, "Updated Nostr pubkey association for ${keyHex.take(16)}...")
     }
 
 
-    /** NEW: Update Nostr pubkey for specific mesh peerID (16-hex). */
+    /** Legacy no-op retained for compatibility with older callers. */
     fun updateNostrPublicKeyForPeerID(peerID: String, nostrPubkey: String) {
-        val pid = peerID.lowercase()
-        if (pid.length == 16 && pid.matches(Regex("^[0-9a-f]+$"))) {
-            peerIdIndex[pid] = nostrPubkey
-            savePeerIdIndex()
-            Log.d(TAG, "Indexed npub for peerID ${pid.take(8)}…")
-        } else {
-            Log.w(TAG, "updateNostrPublicKeyForPeerID called with non-16hex peerID: $peerID")
-        }
     }
 
 
-    /** NEW: Resolve Nostr pubkey via current peerID mapping (fast path). */
+    /** Legacy lookup retained for stored data compatibility. */
     fun findNostrPubkeyForPeerID(peerID: String): String? {
         return peerIdIndex[peerID.lowercase()]
     }
 
-    /** NEW: Resolve peerID (16-hex) for a given Nostr pubkey (npub or hex). */
+    /** Legacy lookup retained for stored data compatibility. */
     fun findPeerIDForNostrPubkey(nostrPubkey: String): String? {
         // First, try direct match in peerIdIndex (values are stored as npub strings)
         peerIdIndex.entries.firstOrNull { it.value.equals(nostrPubkey, ignoreCase = true) }?.let { return it.key }
@@ -238,7 +204,7 @@ class FavoritesPersistenceService private constructor(private val context: Conte
         notifyAllCleared()
     }
 
-    /** Find Noise key by Nostr pubkey */
+    /** Legacy lookup retained for stored data compatibility. */
     fun findNoiseKey(forNostrPubkey: String): ByteArray? {
         val targetHex = normalizeNostrKeyToHex(forNostrPubkey) ?: return null
         return favorites.values.firstOrNull { rel ->
@@ -246,7 +212,7 @@ class FavoritesPersistenceService private constructor(private val context: Conte
         }?.peerNoisePublicKey
     }
 
-    /** Find Nostr pubkey by Noise key */
+    /** Legacy lookup retained for stored data compatibility. */
     fun findNostrPubkey(forNoiseKey: ByteArray): String? {
         val keyHex = forNoiseKey.joinToString("") { "%02x".format(it) }
         return favorites[keyHex]?.peerNostrPublicKey
@@ -326,12 +292,9 @@ class FavoritesPersistenceService private constructor(private val context: Conte
         snapshot.forEach { runCatching { it.onAllCleared() } }
     }
 
-    /** Normalize a Nostr public key string (npub bech32 or hex) to lowercase hex */
+    /** Normalize a legacy public key string to lowercase hex. */
     private fun normalizeNostrKeyToHex(value: String): String? = try {
-        if (value.startsWith("npub1")) {
-            val (hrp, data) = com.bitchat.android.nostr.Bech32.decode(value)
-            if (hrp != "npub") null else data.joinToString("") { "%02x".format(it) }
-        } else value.lowercase()
+        value.takeIf { it.matches(Regex("^[0-9a-fA-F]{64}$")) }?.lowercase()
     } catch (_: Exception) { null }
 }
 

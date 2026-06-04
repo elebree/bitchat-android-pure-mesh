@@ -93,31 +93,6 @@ object AppConstants {
         const val MAX_CONNECTIONS_ULTRA_LOW: Int = 4
     }
 
-    object Nostr {
-        // Relay backoff
-        const val INITIAL_BACKOFF_INTERVAL_MS: Long = 1_000L
-        const val MAX_BACKOFF_INTERVAL_MS: Long = 300_000L
-        const val BACKOFF_MULTIPLIER: Double = 2.0
-        const val MAX_RECONNECT_ATTEMPTS: Int = 10
-
-        // Transport
-        const val READ_ACK_INTERVAL_MS: Long = 350L
-
-        // Deduplicator
-        const val DEFAULT_DEDUP_CAPACITY: Int = 10_000
-
-        // Relay subscription validation
-        const val SUBSCRIPTION_VALIDATION_INTERVAL_MS: Long = 30_000L
-    }
-
-    object Tor {
-        const val DEFAULT_SOCKS_PORT: Int = 9060
-        const val RESTART_DELAY_MS: Long = 2_000L
-        const val INACTIVITY_TIMEOUT_MS: Long = 5_000L
-        const val MAX_RETRY_ATTEMPTS: Int = 5
-        const val STOP_TIMEOUT_MS: Long = 7_000L
-    }
-
     object UI {
         const val MAX_NICKNAME_LENGTH: Int = 15
         const val BASE_FONT_SIZE_SP: Int = 15
