@@ -3,13 +3,15 @@
 This document provides context, architectural insights, and development standards for AI agents working on the Bitchat Android codebase.
 
 ## 1. Project Overview
-**Bitchat** is a decentralized, off-grid communication application focused on privacy and censorship resistance. It utilizes mesh networking (primarily Bluetooth LE and Tor/Arti) to enable peer-to-peer messaging without centralized servers.
+**Bitchat** is a decentralized, off-grid communication application focused on privacy and censorship resistance. This fork is a Bluetooth-only pure-mesh build: peer-to-peer messaging is handled through Bluetooth LE without centralized servers.
+
+Tor/Arti, Nostr relay integration, and geohash/location-channel features have been removed from this fork. Do not reintroduce their dependencies, JNI libraries, assets, tools, or ProGuard rules unless explicitly requested.
 
 **Key Technologies:**
 - **Language:** Kotlin (JVM Target 1.8)
 - **UI Framework:** Jetpack Compose (Material 3)
 - **Asynchronous:** Kotlin Coroutines & Flow
-- **Networking:** Bluetooth Low Energy (BLE), Tor (Arti Rust bridge), OkHttp
+- **Networking:** Bluetooth Low Energy (BLE)
 - **Architecture:** MVVM with Clean Architecture principles
 - **Build System:** Gradle (Kotlin DSL)
 
@@ -28,9 +30,10 @@ The application follows a clean architecture pattern, heavily modularized by fea
 | `noise/` | **Encryption**: Implementation of the Noise Protocol Framework for secure channels. |
 | `identity/` | **User Identity**: Management of user profiles and public/private keys. |
 | `features/` | **App Features**: Sub-modules for `voice`, `file`, and `media` handling. |
-| `nostr/` | **Relay Integration**: Logic for Nostr protocol integration and relay management. |
-| `geohash/` | **Location**: Utilities for location-based features and geohashing. |
-| `net/` | **Networking**: General network utilities and abstractions. |
+| `favorites/` | **Favorites**: Trusted/favorite peer state and related behavior. |
+| `services/` | **Support Services**: App state, verification, and persistence helpers. |
+| `sync/` | **Synchronization**: Mesh synchronization helpers. |
+| `util/`, `utils/` | **Utilities**: Shared constants and helper code. |
 
 ## 3. Key Components
 
@@ -41,9 +44,9 @@ The application follows a clean architecture pattern, heavily modularized by fea
 - **Theme**: Custom theme definitions in `ui/theme`.
 
 ### Networking & Connectivity
-- **MeshForegroundService**: The critical component that keeps the mesh network alive. It manages the lifecycle of BLE scanning/advertising and other transport layers.
-- **BLE Stack**: Located in `mesh/` and `net/`, handles the intricacies of Android Bluetooth interactions.
-- **Tor/Arti**: Integrated via JNI (`jniLibs`) to provide anonymous internet routing where available.
+- **MeshForegroundService**: The critical component that keeps the mesh network alive. It manages the lifecycle of BLE scanning/advertising.
+- **BLE Stack**: Located in `mesh/`, handles the intricacies of Android Bluetooth interactions.
+- **Removed Transports**: Tor/Arti, Nostr relays, and geohash/location channels are intentionally absent in this fork.
 
 ## 4. Development Standards
 
@@ -61,9 +64,10 @@ The application follows a clean architecture pattern, heavily modularized by fea
   - Instrumented: `./gradlew connectedAndroidTest`
 
 ## 5. Critical Constraints & Gotchas
-1.  **Permissions**: The app relies heavily on dangerous runtime permissions (Location, Bluetooth Scan/Connect/Advertise, Audio Recording). Always verify permission handling patterns in `MainActivity` or permission wrappers before adding new hardware features.
+1.  **Permissions**: The app relies heavily on dangerous runtime permissions (Location for BLE scanning compatibility, Bluetooth Scan/Connect/Advertise, Audio Recording, Camera, and media access). Always verify permission handling patterns in `MainActivity` or permission wrappers before adding new hardware features.
 2.  **Hardware Dependency**: Features like BLE are difficult to emulate. When writing code for these, focus on robust error handling and defensive programming as hardware behavior can be flaky.
 3.  **Background Limits**: Android enforces strict background execution limits. Network operations intended to persist must be tied to the `MeshForegroundService`.
+4.  **Bluetooth-only Scope**: Avoid adding internet relay, Tor/Arti, Nostr, geohash, or location-channel code paths unless the user explicitly asks for those features.
 
 ## 6. Common Tasks
 - **Build Debug APK**: `./gradlew assembleDebug`

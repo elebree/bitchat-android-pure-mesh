@@ -127,13 +127,6 @@ dependencies {
     // Bluetooth
     implementation(libs.nordic.ble)
 
-    // WebSocket and Tor dependencies removed for Bluetooth-only build
-    // implementation(libs.okhttp)
-    // implementation(libs.tor.android.binary)
-
-    // Google Play Services Location removed for Bluetooth-only build
-    // implementation(libs.gms.location)
-
     // Security preferences
     implementation(libs.androidx.security.crypto)
     
