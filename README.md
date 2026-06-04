@@ -1,3 +1,14 @@
+> [!NOTE]
+> This repository is a **Bluetooth-only** pure-mesh fork of bitchat for Android.
+> Tor/Arti, Nostr relay integration, geohash/location-channel features, and their related build assets have been removed.
+> The goal of this fork is to keep the app focused on local off-grid BLE mesh messaging with a smaller, simpler APK surface.
+>
+> Debug-certificate APK builds for this fork can be downloaded from this repository's GitHub Releases page.
+>
+> The original upstream README continues below, so some links and feature descriptions may still refer to the original bitchat project.
+
+---
+
 <p align="center">
     <img src="https://github.com/user-attachments/assets/188c42f8-d249-4a72-b27a-e2b4f10a00a8" alt="Bitchat Android Logo" width="480">
 </p>
