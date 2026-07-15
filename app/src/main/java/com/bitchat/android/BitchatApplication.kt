@@ -17,7 +17,13 @@ class BitchatApplication : Application() {
         // Initialize debug preference manager (persists debug toggles)
         try { com.bitchat.android.ui.debug.DebugPreferenceManager.init(this) } catch (_: Exception) { }
 
-        // Initialize favorites persistence for Bluetooth-only functionality
+        // Initialize Wi‑Fi Aware controller with persisted default
+        try {
+            val enabled = com.bitchat.android.ui.debug.DebugPreferenceManager.getWifiAwareEnabled(false)
+            com.bitchat.android.wifiaware.WifiAwareController.initialize(this, enabled)
+        } catch (_: Exception) { }
+
+        // Initialize favorites persistence for local mesh functionality
         try {
             com.bitchat.android.favorites.FavoritesPersistenceService.initialize(this)
         } catch (_: Exception) { }
